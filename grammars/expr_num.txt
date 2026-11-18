@@ -1,0 +1,5 @@
+# Expression grammar (4.1) with numbers added, for real input through the lexer:
+#   python lr_parser/parser.py grammars/expr_num.txt "count + 10 * (x + y)"
+E -> E + T | T
+T -> T * F | F
+F -> ( E ) | id | num

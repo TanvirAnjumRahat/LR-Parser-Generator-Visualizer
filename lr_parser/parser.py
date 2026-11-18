@@ -31,16 +31,28 @@ import sys
 from grammar import load_grammar, END_MARKER, EPSILON
 from lr0 import canonical_collection
 from tables import build_slr_table, find_conflicts, explain_conflicts
+from lexer import Token, tokenize, LexicalError, print_tokens
 
 
 class ParseTreeNode:
-    """A node of the parse tree: a grammar symbol and its children (left to right)."""
+    """
+    A node of the parse tree: a grammar symbol and its children (left to right).
+    Leaves made from input tokens also keep the lexeme, e.g. symbol "id",
+    lexeme "count".
+    """
 
-    def __init__(self, symbol, children=None):
+    def __init__(self, symbol, children=None, lexeme=None):
         self.symbol = symbol
         if children is None:
             children = []
         self.children = children
+        self.lexeme = lexeme
+
+    def label(self):
+        """Text to show for this node: "id (count)", or just the symbol."""
+        if self.lexeme is not None and self.lexeme != self.symbol:
+            return f"{self.symbol} ({self.lexeme})"
+        return self.symbol
 
     def leaves(self):
         """The yield of the tree: its leaves from left to right."""
@@ -62,7 +74,9 @@ class ParseResult:
         self.tree = None         # root ParseTreeNode if accepted
         self.error = None        # error message if not accepted
         self.error_position = None   # 1-based token position of the error
+        self.error_token = None      # the Token where the error happened (has line/column)
         self.expected = []       # terminals that would have been valid at the error
+        self.tokens = []         # the tokens that were parsed
 
 
 def choose_action(cell):
@@ -107,15 +121,47 @@ def expected_terminals(grammar, action, state):
     return expected
 
 
+def make_token_list(tokens):
+    """
+    Accept either Token objects (from the lexer) or plain terminal names
+    like ["id", "*", "id"], and return a list of Token objects.
+    Plain names get position line 1, column = token number.
+    """
+    result = []
+    number = 0
+    for t in tokens:
+        number += 1
+        if isinstance(t, Token):
+            result.append(t)
+        else:
+            result.append(Token(t, t, 1, number))
+    return result
+
+
+def end_marker_token(tokens):
+    """The $ token, placed just after the last real token."""
+    if not tokens:
+        return Token(END_MARKER, END_MARKER, 1, 1)
+    last = tokens[-1]
+    return Token(END_MARKER, END_MARKER, last.line, last.column + len(last.lexeme))
+
+
+def where(token):
+    return f"line {token.line}, column {token.column}"
+
+
 def parse(grammar, action, goto_table, tokens, resolve_conflicts=False):
     """
-    Run Algorithm 4.44 on a list of tokens (terminal names, e.g. ["id", "*", "id"]).
+    Run Algorithm 4.44 on a list of tokens: Token objects from the lexer, or
+    plain terminal names like ["id", "*", "id"].
     Works with any ACTION/GOTO table from tables.py.
 
     If the table has conflicts we refuse to parse, unless resolve_conflicts
     is True; then choose_action() picks one action and the trace says which.
     """
     result = ParseResult()
+    tokens = make_token_list(tokens)
+    result.tokens = tokens
 
     conflicts = find_conflicts(action)
     if conflicts and not resolve_conflicts:
@@ -123,34 +169,46 @@ def parse(grammar, action, goto_table, tokens, resolve_conflicts=False):
                         f"is not deterministic for this table type. Refusing to parse.")
         return result
 
-    input_tokens = list(tokens) + [END_MARKER]
+    # Every token kind must be a terminal of the grammar, otherwise the
+    # parser could never shift it. Check this before parsing for a clear message.
+    for n in range(len(tokens)):
+        t = tokens[n]
+        if t.kind not in grammar.terminals:
+            result.error_position = n + 1
+            result.error_token = t
+            result.error = (f"Token {n + 1} '{t.lexeme}' at {where(t)} has kind '{t.kind}', "
+                            f"which is not a terminal of this grammar. "
+                            f"Terminals are: {', '.join(grammar.terminals)}")
+            return result
+
+    input_tokens = tokens + [end_marker_token(tokens)]
     state_stack = [0]
     node_stack = []      # parse-tree nodes; their symbols are the SYMBOLS column
     ip = 0               # index of the current input token
 
     while True:
         s = state_stack[-1]
-        a = input_tokens[ip]
+        a = input_tokens[ip].kind
 
         # Snapshot of the configuration BEFORE this move (one row of Figure 4.38)
         stack_text = " ".join(str(x) for x in state_stack)
         symbols_text = " ".join(node.symbol for node in node_stack)
-        input_text = " ".join(input_tokens[ip:])
+        input_text = " ".join(t.kind for t in input_tokens[ip:])
 
         cell = action.get((s, a))
 
         # ---------- error: empty ACTION entry ----------
         if cell is None:
+            bad = input_tokens[ip]
             result.error_position = ip + 1
+            result.error_token = bad
             result.expected = expected_terminals(grammar, action, s)
             if a == END_MARKER:
                 found = "unexpected end of input"
-            elif not grammar.is_terminal(a):
-                found = f"'{a}' is not a terminal of this grammar"
             else:
-                found = f"unexpected token '{a}'"
-            result.error = (f"Syntax error at token {ip + 1}: {found} (in state {s}). "
-                            f"Expected one of: {', '.join(result.expected)}")
+                found = f"unexpected token '{bad.lexeme}' ({a})"
+            result.error = (f"Syntax error at {where(bad)} (token {ip + 1}): {found}, "
+                            f"in state {s}. Expected one of: {', '.join(result.expected)}")
             result.steps.append((stack_text, symbols_text, input_text, "error"))
             return result
 
@@ -160,7 +218,8 @@ def parse(grammar, action, goto_table, tokens, resolve_conflicts=False):
         if act.startswith("s"):
             t = int(act[1:])
             state_stack.append(t)
-            node_stack.append(ParseTreeNode(a))   # a leaf for the token
+            # A leaf for the token; it keeps the lexeme, e.g. id (count)
+            node_stack.append(ParseTreeNode(a, lexeme=input_tokens[ip].lexeme))
             ip += 1
             description = "shift"
 
@@ -196,6 +255,21 @@ def parse(grammar, action, goto_table, tokens, resolve_conflicts=False):
         if note:
             description += f"   [{note}]"
         result.steps.append((stack_text, symbols_text, input_text, description))
+
+
+def parse_text(grammar, action, goto_table, text, resolve_conflicts=False):
+    """
+    Parse raw source text: run the lexer first, then the LR parser.
+    The grammar's terminals are passed to the lexer as reserved words.
+    A lexical error is returned as a failed ParseResult.
+    """
+    try:
+        tokens = tokenize(text, keywords=set(grammar.terminals))
+    except LexicalError as e:
+        result = ParseResult()
+        result.error = str(e)
+        return result
+    return parse(grammar, action, goto_table, tokens, resolve_conflicts)
 
 
 def rightmost_derivation(grammar, reductions):
@@ -255,14 +329,14 @@ def print_trace(result):
 def print_tree(node, prefix="", is_last=True, is_root=True):
     """Print the parse tree sideways in the console."""
     if is_root:
-        print(node.symbol)
+        print(node.label())
         child_prefix = ""
     else:
         if is_last:
-            print(prefix + "└── " + node.symbol)
+            print(prefix + "└── " + node.label())
             child_prefix = prefix + "    "
         else:
-            print(prefix + "├── " + node.symbol)
+            print(prefix + "├── " + node.label())
             child_prefix = prefix + "│   "
 
     for i in range(len(node.children)):
@@ -306,25 +380,32 @@ def print_result(grammar, result):
 
 
 if __name__ == "__main__":
-    # Usage: python parser.py <grammar-file> "id * id + id" [--resolve]
+    # Usage: python parser.py <grammar-file> "<source text>" [--resolve] [--out NAME]
+    #   the text goes through the lexer: "count + 10 * (x + y)" -> id + num * ( id + id )
     #   --resolve : parse even if the table has conflicts (Yacc default rules)
+    #   --out NAME: name output files NAME_parse_tree.png (default: grammar file name)
     sys.stdout.reconfigure(encoding="utf-8")
     args = sys.argv[1:]
     resolve = "--resolve" in args
     if resolve:
         args.remove("--resolve")
+    out = None
+    if "--out" in args:
+        k = args.index("--out")
+        out = args[k + 1]
+        del args[k:k + 2]
     if len(args) < 2:
-        print('Usage: python parser.py <grammar-file> "<tokens separated by spaces>" [--resolve]')
+        print('Usage: python parser.py <grammar-file> "<source text>" [--resolve] [--out NAME]')
         sys.exit(1)
 
-    from visualize import render_parse_tree   # only needed when run as a program
+    # visualize needs the graphviz package, so import it only when run as a program
+    from visualize import parse_tree_graph, save_graph, output_base_name
 
     g = load_grammar(args[0])
-    tokens = args[1].split()
     C, trans = canonical_collection(g)
     action, goto_table = build_slr_table(g, C, trans)
 
-    print(f"Grammar: {args[0]}   Table: SLR(1)   Input: {' '.join(tokens)}")
+    print(f"Grammar: {args[0]}   Table: SLR(1)   Input: {args[1]}")
     print()
 
     conflicts = find_conflicts(action)
@@ -333,11 +414,15 @@ if __name__ == "__main__":
         explain_conflicts(g, conflicts)
         print()
 
-    result = parse(g, action, goto_table, tokens, resolve_conflicts=resolve)
+    result = parse_text(g, action, goto_table, args[1], resolve_conflicts=resolve)
+    if result.tokens:
+        print("Tokens from the lexer:")
+        print_tokens(result.tokens)
+        print()
     print_result(g, result)
     if not result.accepted and conflicts and not resolve:
         print("(Run again with --resolve to parse using Yacc's default conflict rules.)")
 
     if result.accepted:
         print()
-        render_parse_tree(g, result.tree, "parse_tree")
+        save_graph(parse_tree_graph(g, result.tree), output_base_name(args[0], out) + "_parse_tree")

@@ -130,8 +130,10 @@ class TestRejected(unittest.TestCase):
         self.check_rejects("", 1, ["(", "id"])
 
     def test_unknown_token(self):
-        result = self.check_rejects("id x id", 2, ["+", "*", ")", "$"])
+        # Checked before parsing starts, so no parser moves and no expected list
+        result = self.check_rejects("id x id", 2, [])
         self.assertIn("not a terminal", result.error)
+        self.assertEqual(result.steps, [])
 
     def test_epsilon_grammar_rejects(self):
         g, result = slr_parse("epsilon.txt", "id + + id")

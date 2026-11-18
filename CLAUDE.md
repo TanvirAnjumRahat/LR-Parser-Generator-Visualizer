@@ -45,7 +45,7 @@ tests/            # test cases
 1. Grammar input, augmentation, FIRST/FOLLOW ✅
 2. LR(0) items, SLR table, conflict detection ✅
 3. Table-driven parsing: trace, parse tree (Graphviz), error messages with expected tokens ✅
-4. Visualization of the LR(0) automaton (Graphviz) + lexer from labs/3.4
+4. Visualization of the LR(0) automaton (Graphviz) + lexer from labs/3.4 ✅
 5. CLR(1) with LR(1) items, then LALR(1) by merging states with the same core
 6. LR(0) table option, CLI menu, step-by-step mode, comparison table
 7. Tests for all grammars + viva guide
