@@ -1,0 +1,4 @@
+# Ambiguous expression grammar, Dragon Book grammar (4.3) / Section 4.8.1.
+# "id + id * id" has two parse trees, so every LR method has conflicts.
+# See ambiguous_expr_prec.txt for the same grammar with precedence declarations.
+E -> E + E | E * E | ( E ) | id

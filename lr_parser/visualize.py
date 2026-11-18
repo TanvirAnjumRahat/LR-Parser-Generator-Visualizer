@@ -224,29 +224,48 @@ def parse_tree_graph(grammar, root):
     return graph
 
 
+# ----------------------------------------------------------------------
+# Helpers used by parser.py, main.py and the command line below
+# ----------------------------------------------------------------------
+
+AUTOMATON_KINDS = {"lr0": "LR(0) automaton", "slr": "LR(0) automaton",
+                   "clr": "LR(1) automaton",
+                   "lalr": "LALR(1) automaton (merged LR(1) states)"}
+
+
+def draw_automaton(grammar, table, grammar_file, out=None):
+    """Draw the automaton of a ParsingTable to output/<name>_<method>_automaton.png."""
+    kind = AUTOMATON_KINDS[table.method]
+    graph = automaton_graph(grammar, table.states, table.transitions, table.conflict_states(),
+                            title=f"{kind} for {grammar_file}  (red = {table.name} conflict)",
+                            merged_from=table.merged_from)
+    return save_graph(graph, output_base_name(grammar_file, out) + f"_{table.method}_automaton")
+
+
+def draw_parse_tree(grammar, tree, grammar_file, out=None):
+    """Draw a parse tree to output/<name>_parse_tree.png."""
+    return save_graph(parse_tree_graph(grammar, tree),
+                      output_base_name(grammar_file, out) + "_parse_tree")
+
+
 if __name__ == "__main__":
-    # Usage: python visualize.py <grammar-file> [--method slr|clr|lalr] [--out NAME]
+    # Usage: python visualize.py <grammar-file> [--method lr0|slr|lalr|clr] [--out NAME]
     # Draws the automaton the chosen table is built from; states with conflicts are red.
+    #   lr0  -> LR(0) automaton            output/<name>_lr0_automaton.png
     #   slr  -> LR(0) automaton            output/<name>_slr_automaton.png
     #   clr  -> LR(1) automaton            output/<name>_clr_automaton.png
     #   lalr -> merged LALR(1) automaton   output/<name>_lalr_automaton.png
-    sys.stdout.reconfigure(encoding="utf-8")
-    from grammar import load_grammar
+    from grammar import load_grammar, use_utf8_output
+    use_utf8_output()
     from tables import build_parsing_table, pop_option, METHOD_NAMES
 
     args = sys.argv[1:]
     out = pop_option(args, "--out")
     method = pop_option(args, "--method", "slr")
     if not args or method not in METHOD_NAMES:
-        print("Usage: python visualize.py <grammar-file> [--method slr|clr|lalr] [--out NAME]")
+        print("Usage: python visualize.py <grammar-file> [--method lr0|slr|lalr|clr] [--out NAME]")
         sys.exit(1)
 
     g = load_grammar(args[0])
     table = build_parsing_table(g, method)
-    kind = {"slr": "LR(0) automaton", "clr": "LR(1) automaton",
-            "lalr": "LALR(1) automaton (merged LR(1) states)"}[method]
-
-    graph = automaton_graph(g, table.states, table.transitions, table.conflict_states(),
-                            title=f"{kind} for {args[0]}  (red = {table.name} conflict)",
-                            merged_from=table.merged_from)
-    save_graph(graph, output_base_name(args[0], out) + f"_{method}_automaton")
+    draw_automaton(g, table, args[0], out)

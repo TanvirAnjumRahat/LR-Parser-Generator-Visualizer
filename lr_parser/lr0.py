@@ -17,7 +17,7 @@ The epsilon bug fix:
 """
 
 import sys
-from grammar import load_grammar
+from grammar import load_grammar, use_utf8_output
 
 DOT = "·"
 
@@ -175,7 +175,7 @@ def print_collection(grammar, states, transitions):
 
 if __name__ == "__main__":
     # Usage: python lr0.py ../grammars/expr.txt
-    sys.stdout.reconfigure(encoding="utf-8")
+    use_utf8_output()
     if len(sys.argv) < 2:
         print("Usage: python lr0.py <grammar-file>")
         sys.exit(1)

@@ -28,7 +28,7 @@ the single node left is the root of the parse tree.
 """
 
 import sys
-from grammar import load_grammar, END_MARKER, EPSILON
+from grammar import load_grammar, END_MARKER, EPSILON, use_utf8_output
 from tables import (find_conflicts, explain_conflicts,
                     build_parsing_table, pop_option, METHOD_NAMES)
 from lexer import Token, tokenize, LexicalError, print_tokens
@@ -70,6 +70,7 @@ class ParseResult:
     def __init__(self):
         self.accepted = False
         self.steps = []          # list of (stack, symbols, input, action) strings, one per move
+        self.explanations = []   # one sentence per move: which table entries were used
         self.reductions = []     # production numbers in the order they were reduced
         self.tree = None         # root ParseTreeNode if accepted
         self.error = None        # error message if not accepted
@@ -212,6 +213,7 @@ def parse(grammar, action, goto_table, tokens, resolve_conflicts=False):
             result.error = (f"Syntax error at {where(bad)} (token {ip + 1}): {found}, "
                             f"in state {s}. Expected one of: {', '.join(result.expected)}")
             result.steps.append((stack_text, symbols_text, input_text, "error"))
+            result.explanations.append(f"ACTION[{s}, {a}] is empty, so this is a syntax error.")
             return result
 
         act, note = choose_action(cell)
@@ -224,6 +226,8 @@ def parse(grammar, action, goto_table, tokens, resolve_conflicts=False):
             node_stack.append(ParseTreeNode(a, lexeme=input_tokens[ip].lexeme))
             ip += 1
             description = "shift"
+            explanation = (f"ACTION[{s}, {a}] = s{t}: push '{a}' and state {t}, "
+                           f"move to the next input token.")
 
         # ---------- reduce by A -> beta ----------
         elif act.startswith("r"):
@@ -242,14 +246,23 @@ def parse(grammar, action, goto_table, tokens, resolve_conflicts=False):
                 children = [ParseTreeNode(EPSILON)]   # show A -> epsilon in the tree
 
             t = state_stack[-1]
-            state_stack.append(goto_table[(t, A)])
+            g = goto_table[(t, A)]
+            state_stack.append(g)
             node_stack.append(ParseTreeNode(A, children))
             result.reductions.append(prod_index)
             description = f"reduce by {grammar.production_to_string(prod_index)}"
+            if len(beta) == 0:
+                popped = "pop nothing (epsilon rule)"
+            else:
+                popped = f"pop {len(beta)} symbol(s) '{' '.join(beta)}' (the handle)"
+            explanation = (f"ACTION[{s}, {a}] = r{prod_index}: {popped}, state {t} is "
+                           f"now on top, GOTO[{t}, {A}] = {g}: push '{A}' and state {g}.")
 
         # ---------- accept ----------
         else:
             result.steps.append((stack_text, symbols_text, input_text, "accept"))
+            result.explanations.append(f"ACTION[{s}, $] = acc: the whole input was "
+                                       f"reduced to {grammar.start_symbol}.")
             result.accepted = True
             result.tree = node_stack[-1]
             return result
@@ -257,6 +270,7 @@ def parse(grammar, action, goto_table, tokens, resolve_conflicts=False):
         if note:
             description += f"   [{note}]"
         result.steps.append((stack_text, symbols_text, input_text, description))
+        result.explanations.append(explanation)
 
 
 def parse_text(grammar, action, goto_table, text, resolve_conflicts=False):
@@ -300,8 +314,11 @@ def rightmost_derivation(grammar, reductions):
 # Printing
 # ----------------------------------------------------------------------
 
-def print_trace(result):
-    """Print the moves in the layout of Dragon Book Figure 4.38."""
+def trace_lines(result):
+    """
+    Format the moves in the layout of Dragon Book Figure 4.38.
+    Returns (header line, separator line, list of row lines).
+    """
     headers = ("", "STACK", "SYMBOLS", "INPUT", "ACTION")
     rows = []
     for n in range(len(result.steps)):
@@ -322,10 +339,49 @@ def print_trace(result):
                 row[3].rjust(widths[3]) + "  " +   # input is right-aligned, as in the book
                 row[4])
 
-    print(format_row(headers))
-    print("-" * (sum(widths) + 8 + 30))
+    row_lines = []
     for row in rows:
-        print(format_row(row))
+        row_lines.append(format_row(row))
+    return format_row(headers), "-" * (sum(widths) + 8 + 30), row_lines
+
+
+def print_trace(result):
+    """Print all moves at once."""
+    header, separator, row_lines = trace_lines(result)
+    print(header)
+    print(separator)
+    for line in row_lines:
+        print(line)
+
+
+def print_trace_step_by_step(result, read=input):
+    """
+    Step-by-step mode: show one move at a time, with an explanation of the
+    table entries used, and wait for Enter before the next move.
+    Type r + Enter to show the rest at once, q + Enter to stop.
+    'read' is the function that reads a line (input() normally; tests pass their own).
+    """
+    header, separator, row_lines = trace_lines(result)
+    print(header)
+    print(separator)
+    show_all = False
+    for n in range(len(row_lines)):
+        print(row_lines[n])
+        if n < len(result.explanations):
+            print("      -> " + result.explanations[n])
+        if show_all or n == len(row_lines) - 1:
+            continue
+        try:
+            answer = read("      [Enter] next move, [r] run to the end, [q] stop: ")
+        except EOFError:
+            answer = "r"
+        answer = answer.strip().lower()
+        if answer == "q":
+            print("(stopped)")
+            return False
+        if answer == "r":
+            show_all = True
+    return True
 
 
 def print_tree(node, prefix="", is_last=True, is_root=True):
@@ -374,9 +430,10 @@ def reductions_before_error(result):
     return count
 
 
-def print_result(grammar, result):
-    """Print the trace, then either the tree + derivation or the error."""
-    if result.steps:
+def print_result(grammar, result, show_trace=True):
+    """Print the trace, then either the tree + derivation or the error.
+    show_trace=False when the trace was already shown step by step."""
+    if result.steps and show_trace:
         print_trace(result)
         print()
 
@@ -401,25 +458,30 @@ def print_result(grammar, result):
 
 if __name__ == "__main__":
     # Usage: python parser.py <grammar-file> "<source text>"
-    #                         [--method slr|clr|lalr] [--resolve] [--out NAME]
+    #                  [--method lr0|slr|lalr|clr] [--step] [--resolve] [--out NAME]
     #   the text goes through the lexer: "count + 10 * (x + y)" -> id + num * ( id + id )
     #   --method  : which parsing table to use (default slr)
+    #   --step    : show the moves one at a time (press Enter for the next)
     #   --resolve : parse even if the table has conflicts (Yacc default rules)
     #   --out NAME: name output files NAME_parse_tree.png (default: grammar file name)
-    sys.stdout.reconfigure(encoding="utf-8")
+    use_utf8_output()
     args = sys.argv[1:]
     resolve = "--resolve" in args
     if resolve:
         args.remove("--resolve")
+    step = "--step" in args
+    if step:
+        args.remove("--step")
     out = pop_option(args, "--out")
     method = pop_option(args, "--method", "slr")
     if len(args) < 2 or method not in METHOD_NAMES:
         print('Usage: python parser.py <grammar-file> "<source text>" '
-              '[--method slr|clr|lalr] [--resolve] [--out NAME]')
+              '[--method lr0|slr|lalr|clr] [--step] [--resolve] [--out NAME]')
         sys.exit(1)
 
     # visualize needs the graphviz package, so import it only when run as a program
-    from visualize import parse_tree_graph, save_graph, output_base_name
+    from visualize import draw_parse_tree
+    from tables import print_resolutions
 
     g = load_grammar(args[0])
     table = build_parsing_table(g, method)
@@ -429,6 +491,10 @@ if __name__ == "__main__":
     print(f"Grammar: {args[0]}   Table: {table.name} ({len(table.states)} states)   "
           f"Input: {args[1]}")
     print()
+
+    if table.resolved:
+        print_resolutions(table)
+        print()
 
     conflicts = table.conflicts
     if conflicts:
@@ -441,10 +507,15 @@ if __name__ == "__main__":
         print("Tokens from the lexer:")
         print_tokens(result.tokens)
         print()
-    print_result(g, result)
+    if step and result.steps:
+        print_trace_step_by_step(result)
+        print()
+        print_result(g, result, show_trace=False)
+    else:
+        print_result(g, result)
     if not result.accepted and conflicts and not resolve:
         print("(Run again with --resolve to parse using Yacc's default conflict rules.)")
 
     if result.accepted:
         print()
-        save_graph(parse_tree_graph(g, result.tree), output_base_name(args[0], out) + "_parse_tree")
+        draw_parse_tree(g, result.tree, args[0], out)

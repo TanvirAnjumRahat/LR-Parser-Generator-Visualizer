@@ -22,6 +22,7 @@ How epsilon is stored:
 FIRST/FOLLOW code is adapted from labs/4.4-top_down_ll1_parser.py.
 """
 
+import io
 import sys
 
 EPSILON = "ε"        # marker used inside FIRST sets for the empty string
@@ -29,6 +30,17 @@ END_MARKER = "$"     # end-of-input marker used in FOLLOW sets
 
 # Words the user may write in a grammar file to mean "empty string".
 EPSILON_WORDS = ["epsilon", "ε"]
+
+
+def use_utf8_output():
+    """
+    Make print() use UTF-8 so ε and · show correctly on the Windows console.
+    The isinstance check is needed because sys.stdout is not always a real
+    text stream (e.g. when the tests capture output), and only real text
+    streams have reconfigure().
+    """
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding="utf-8")
 
 
 class Grammar:
@@ -46,10 +58,13 @@ class Grammar:
       non_terminals     list, in order of first appearance (S' first)
       terminals         list, in order of first appearance (no "$")
       first, follow     dicts filled in by compute_first / compute_follow
+      precedence        dict: terminal -> (level, associativity) from %left,
+                        %right, %nonassoc lines (empty if there are none)
     """
 
-    def __init__(self, rule_list):
+    def __init__(self, rule_list, precedence=None):
         # rule_list: list of (lhs, rhs_list) in the order they appeared in the file.
+        # precedence: from parse_precedence_lines(), or None.
         if not rule_list:
             raise ValueError("Grammar is empty: no rules were found.")
 
@@ -91,6 +106,27 @@ class Grammar:
         self.first = compute_first(self)
         self.follow = compute_follow(self)
 
+        # --- Step 6: precedence declarations (only terminals can have one) ---
+        if precedence is None:
+            precedence = {}
+        for symbol in precedence:
+            if symbol not in self.terminals:
+                raise ValueError(f"Precedence declared for '{symbol}', "
+                                 f"which is not a terminal of this grammar.")
+        self.precedence = precedence
+
+    def production_precedence(self, index):
+        """
+        Dragon Book 4.8.1 / Yacc: a production has the precedence and
+        associativity of its RIGHTMOST terminal. E -> E + E gets the
+        precedence of '+'. Returns (level, associativity) or None.
+        """
+        lhs, rhs = self.productions[index]
+        for symbol in reversed(rhs):
+            if symbol in self.terminals:
+                return self.precedence.get(symbol)
+        return None
+
     def make_augmented_name(self, used_names):
         """
         Return S' for start symbol S. If that name is already used in the
@@ -127,8 +163,9 @@ def parse_grammar_lines(lines):
         line_number += 1
         line = line.strip()
 
-        # Skip blank lines and comments
-        if line == "" or line.startswith("#"):
+        # Skip blank lines, comments, and precedence lines
+        # (%left etc. are read by parse_precedence_lines)
+        if line == "" or line.startswith("#") or line.startswith("%"):
             continue
 
         if "->" not in line:
@@ -156,12 +193,48 @@ def parse_grammar_lines(lines):
     return rule_list
 
 
+ASSOCIATIVITY_WORDS = {"%left": "left", "%right": "right", "%nonassoc": "nonassoc"}
+
+
+def parse_precedence_lines(lines):
+    """
+    Read Yacc-style declarations (Dragon Book 4.8.1 and 4.9.2):
+        %left + -
+        %left * /
+        %right ^
+    All tokens on one line have the same precedence; LATER lines have
+    HIGHER precedence. Returns a dict  terminal -> (level, associativity),
+    e.g. {"+": (1, "left"), "*": (2, "left")}.
+    """
+    precedence = {}
+    level = 0
+    line_number = 0
+    for line in lines:
+        line_number += 1
+        words = line.split()
+        if not words or not words[0].startswith("%"):
+            continue
+        if words[0] not in ASSOCIATIVITY_WORDS:
+            raise ValueError(f"Line {line_number}: unknown declaration '{words[0]}' "
+                             f"(use %left, %right or %nonassoc)")
+        if len(words) < 2:
+            raise ValueError(f"Line {line_number}: '{words[0]}' needs at least one token")
+
+        level += 1
+        for token in words[1:]:
+            if token in precedence:
+                raise ValueError(f"Line {line_number}: precedence of '{token}' declared twice")
+            precedence[token] = (level, ASSOCIATIVITY_WORDS[words[0]])
+    return precedence
+
+
 def load_grammar(filename):
     """Read a grammar file and return a fully built Grammar object."""
     with open(filename, encoding="utf-8") as f:
         lines = f.readlines()
     rule_list = parse_grammar_lines(lines)
-    return Grammar(rule_list)
+    precedence = parse_precedence_lines(lines)
+    return Grammar(rule_list, precedence)
 
 
 # ----------------------------------------------------------------------
@@ -286,6 +359,20 @@ def set_to_string(symbol_set, grammar):
     return "{ " + ", ".join(ordered) + " }"
 
 
+def precedence_to_string(grammar):
+    """E.g. "%left +  <  %left *"  (lowest precedence first)."""
+    levels = {}
+    for token, (level, assoc) in grammar.precedence.items():
+        if level not in levels:
+            levels[level] = (assoc, [])
+        levels[level][1].append(token)
+    parts = []
+    for level in sorted(levels):
+        assoc, tokens = levels[level]
+        parts.append(f"%{assoc} {' '.join(tokens)}")
+    return "  <  ".join(parts)
+
+
 def print_grammar_info(grammar):
     print("Augmented grammar (numbered productions):")
     for i in range(len(grammar.productions)):
@@ -295,6 +382,8 @@ def print_grammar_info(grammar):
     print("Augmented start  :", grammar.augmented_start)
     print("Non-terminals    :", ", ".join(grammar.non_terminals))
     print("Terminals        :", ", ".join(grammar.terminals))
+    if grammar.precedence:
+        print("Precedence       :", precedence_to_string(grammar))
     print()
 
     width = max(len(nt) for nt in grammar.non_terminals)
@@ -310,7 +399,7 @@ def print_grammar_info(grammar):
 if __name__ == "__main__":
     # Usage: python grammar.py ../grammars/expr.txt
     # Make sure ε prints correctly on the Windows console.
-    sys.stdout.reconfigure(encoding="utf-8")
+    use_utf8_output()
 
     if len(sys.argv) < 2:
         print("Usage: python grammar.py <grammar-file>")

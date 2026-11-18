@@ -20,6 +20,8 @@ so the parse tree can show "id (count)" and errors can say where they are.
 
 import sys
 
+from grammar import use_utf8_output
+
 
 class Token:
     """One token: kind (the grammar terminal), lexeme (the text), and position."""
@@ -147,7 +149,7 @@ def build_diagrams():
 
 
 # Single characters that are always a token on their own (kind = the character)
-SINGLE_CHARS = "()[]{};,+-*/%"
+SINGLE_CHARS = "()[]{};,+-*/%^"
 
 
 def line_and_column(text, pos):
@@ -234,7 +236,7 @@ def print_tokens(tokens):
 
 if __name__ == "__main__":
     # Usage: python lexer.py "count + 10 * (x + y)"
-    sys.stdout.reconfigure(encoding="utf-8")
+    use_utf8_output()
     source = sys.argv[1] if len(sys.argv) > 1 else "count + 10 * (x + y)"
     try:
         print_tokens(tokenize(source))

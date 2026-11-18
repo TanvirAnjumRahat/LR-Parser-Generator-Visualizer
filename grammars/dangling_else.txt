@@ -1,0 +1,8 @@
+# Dangling-else grammar, Dragon Book Section 4.8.2 (grammar 4.67):
+#   i = if expr then,  t = then,  e = else,  a = any other statement,  b = an expression.
+# Ambiguous, so EVERY LR method has a shift-reduce conflict on 'e':
+# after "i E t S" the parser cannot tell whether the 'e' belongs to this 'if'.
+# Choosing SHIFT (--resolve) matches each else with the closest if, as in C.
+#   try:  python lr_parser/parser.py grammars/dangling_else.txt "i b t i b t a e a" --resolve
+S -> i E t S | i E t S e S | a
+E -> b

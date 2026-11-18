@@ -19,16 +19,23 @@ Dragon Book Algorithm 4.46 ("Constructing an SLR-parsing table"):
 
 Action strings use Dragon Book notation:  s5 = shift to state 5,
 r2 = reduce by production (2),  acc = accept.
+
+Later phases add, in this same file:
+  - LR(0) tables (Phase 6): reduce on EVERY terminal
+  - CLR(1) and LALR(1) tables (Phase 5): reduce on the item's lookahead
+  - precedence/associativity resolution of conflicts, as Yacc does (Phase 6)
+  - a comparison report of all four methods for one grammar (Phase 6)
 """
 
 import sys
-from grammar import load_grammar, print_grammar_info, END_MARKER
+from grammar import load_grammar, print_grammar_info, END_MARKER, use_utf8_output
 from lr0 import canonical_collection, print_collection
 from lr1 import (canonical_lr1_collection, merge_lalr_states,
                  print_lr1_collection, print_merge_report)
 
-# The three table types this project builds, and their display names.
-METHOD_NAMES = {"slr": "SLR(1)", "clr": "CLR(1)", "lalr": "LALR(1)"}
+# The four table types this project builds, from weakest to strongest,
+# and their display names.
+METHOD_NAMES = {"lr0": "LR(0)", "slr": "SLR(1)", "lalr": "LALR(1)", "clr": "CLR(1)"}
 
 
 def add_action(action, state, symbol, act, item, reason):
@@ -45,6 +52,41 @@ def add_action(action, state, symbol, act, item, reason):
     if act not in cell:
         cell[act] = []
     cell[act].append((item, reason))
+
+
+def build_lr0_table(grammar, states, transitions):
+    """
+    LR(0) table: the same as SLR, except rule (b) reduces on EVERY terminal
+    (and $), because an LR(0) parser decides to reduce without looking at
+    the next input symbol at all. So any state that has a complete item
+    together with another item (a shift, or another complete item) is a
+    conflict. A grammar is LR(0) if this table has no conflicts.
+    """
+    action = {}
+    goto_table = {}
+    all_terminals = grammar.terminals + [END_MARKER]
+
+    for i in range(len(states)):
+        for item in states[i]:
+            a = item.next_symbol()
+
+            if a is not None and grammar.is_terminal(a):
+                j = transitions[(i, a)]
+                add_action(action, i, a, f"s{j}", item, f"GOTO(I{i}, {a}) = I{j}")
+
+            elif item.is_complete():
+                if item.lhs == grammar.augmented_start:
+                    add_action(action, i, END_MARKER, "acc", item, "S' -> S · means the whole input is S")
+                else:
+                    for a in all_terminals:
+                        add_action(action, i, a, f"r{item.prod_index}", item,
+                                   "LR(0) reduces on every terminal")
+
+        for A in grammar.non_terminals[1:]:
+            if (i, A) in transitions:
+                goto_table[(i, A)] = transitions[(i, A)]
+
+    return action, goto_table
 
 
 def build_slr_table(grammar, states, transitions):
@@ -120,14 +162,17 @@ def build_lr1_table(grammar, states, transitions):
 class ParsingTable:
     """Everything about one parsing table, so callers don't care which method built it."""
 
-    def __init__(self, method, states, transitions, action, goto_table):
-        self.method = method              # "slr", "clr" or "lalr"
+    def __init__(self, method, states, transitions, action, goto_table, resolved=None):
+        self.method = method              # "lr0", "slr", "lalr" or "clr"
         self.name = METHOD_NAMES[method]  # "SLR(1)", ...
         self.states = states
         self.transitions = transitions
         self.action = action
         self.goto_table = goto_table
-        self.conflicts = find_conflicts(action)
+        self.conflicts = find_conflicts(action)   # conflicts LEFT after precedence
+        if resolved is None:
+            resolved = []
+        self.resolved = resolved          # conflicts settled by %left/%right/%nonassoc
         self.merged_from = None           # LALR only: LR(1) states merged into each state
         self.clr = None                   # LALR only: the CLR table it was made from
 
@@ -140,33 +185,120 @@ class ParsingTable:
 
 def build_parsing_table(grammar, method):
     """
-    Build the SLR(1), CLR(1) or LALR(1) table for a grammar.
+    Build the LR(0), SLR(1), LALR(1) or CLR(1) table for a grammar.
+      lr0  : LR(0) collection, reduce on every terminal
       slr  : LR(0) collection + FOLLOW sets         (Algorithm 4.46)
       clr  : LR(1) collection + lookaheads          (Algorithm 4.56)
       lalr : LR(1) collection, merge same cores,
              then the same construction as clr      (Algorithm 4.59)
+    If the grammar has %left/%right/%nonassoc declarations, they are then
+    used to resolve shift-reduce conflicts (apply_precedence).
     """
-    if method == "slr":
-        states, transitions = canonical_collection(grammar)
-        action, goto_table = build_slr_table(grammar, states, transitions)
-        return ParsingTable("slr", states, transitions, action, goto_table)
+    merged_from = None
+    clr = None
 
-    if method == "clr":
+    if method == "lr0" or method == "slr":
+        states, transitions = canonical_collection(grammar)
+        if method == "lr0":
+            action, goto_table = build_lr0_table(grammar, states, transitions)
+        else:
+            action, goto_table = build_slr_table(grammar, states, transitions)
+    elif method == "clr":
         states, transitions = canonical_lr1_collection(grammar)
         action, goto_table = build_lr1_table(grammar, states, transitions)
-        return ParsingTable("clr", states, transitions, action, goto_table)
-
-    if method == "lalr":
+    elif method == "lalr":
         clr = build_parsing_table(grammar, "clr")
         states, transitions, merged_from = merge_lalr_states(clr.states, clr.transitions)
         action, goto_table = build_lr1_table(grammar, states, transitions)
-        table = ParsingTable("lalr", states, transitions, action, goto_table)
+    else:
+        raise ValueError(f"Unknown method '{method}'. Use one of: {', '.join(METHOD_NAMES)}")
+
+    resolved = apply_precedence(grammar, action)
+    table = ParsingTable(method, states, transitions, action, goto_table, resolved)
+    if method == "lalr":
         table.merged_from = merged_from
         table.clr = clr
         mark_conflicts_created_by_merging(table)
-        return table
+    return table
 
-    raise ValueError(f"Unknown method '{method}'. Use one of: slr, clr, lalr")
+
+def apply_precedence(grammar, action):
+    """
+    Resolve shift-reduce conflicts with precedence and associativity, the way
+    Yacc does (Dragon Book 4.8.1 and 4.9.2). For a cell with "shift on a"
+    and "reduce by production p":
+      - if a has higher precedence than p  -> shift   (e.g. * after E + E)
+      - if p has higher precedence than a  -> reduce  (e.g. + after E * E)
+      - equal precedence: %left -> reduce, %right -> shift,
+                          %nonassoc -> neither: the cell becomes an error
+    p's precedence is that of its rightmost terminal (Grammar.production_precedence).
+    Cells where the terminal or the production has no precedence, and all
+    reduce-reduce conflicts, are left alone and stay conflicts.
+
+    Changes 'action' in place. Returns a list of what was resolved, for printing.
+    """
+    resolved = []
+    if not grammar.precedence:
+        return resolved
+
+    for key in sorted(action.keys(), key=lambda k: (k[0], str(k[1]))):
+        cell = action[key]
+        if len(cell) != 2:
+            continue
+        shift = None
+        reduce = None
+        for act in cell:
+            if act.startswith("s"):
+                shift = act
+            elif act.startswith("r"):
+                reduce = act
+        if shift is None or reduce is None:
+            continue
+
+        state, a = key
+        prod_index = int(reduce[1:])
+        token_prec = grammar.precedence.get(a)
+        prod_prec = grammar.production_precedence(prod_index)
+        if token_prec is None or prod_prec is None:
+            continue
+
+        token_level, token_assoc = token_prec
+        prod_level = prod_prec[0]
+        prod_text = grammar.production_to_string(prod_index)
+
+        if token_level > prod_level:
+            chosen = shift
+            reason = f"'{a}' has higher precedence than {prod_text}"
+        elif token_level < prod_level:
+            chosen = reduce
+            reason = f"{prod_text} has higher precedence than '{a}'"
+        elif token_assoc == "left":
+            chosen = reduce
+            reason = f"same precedence, '{a}' is left-associative"
+        elif token_assoc == "right":
+            chosen = shift
+            reason = f"same precedence, '{a}' is right-associative"
+        else:
+            chosen = "error"
+            reason = f"same precedence, '{a}' is non-associative"
+
+        resolved.append({"state": state, "symbol": a,
+                         "choices": f"{shift}/{reduce}", "chosen": chosen, "reason": reason})
+        if chosen == "error":
+            del action[key]                 # empty cell = syntax error
+        else:
+            action[key] = {chosen: cell[chosen]}
+
+    return resolved
+
+
+def print_resolutions(table):
+    if not table.resolved:
+        return
+    print(f"{len(table.resolved)} shift-reduce conflict(s) resolved by precedence/associativity:")
+    for r in table.resolved:
+        print(f"  state {r['state']}, input '{r['symbol']}': {r['choices']} -> "
+              f"{r['chosen']}   ({r['reason']})")
 
 
 def mark_conflicts_created_by_merging(lalr_table):
@@ -359,7 +491,7 @@ def pop_option(args, name, default=None):
 
 def print_states(grammar, table):
     """Print the item sets that the table was built from."""
-    if table.method == "slr":
+    if table.method == "lr0" or table.method == "slr":
         print_collection(grammar, table.states, table.transitions)
     elif table.method == "clr":
         print_lr1_collection(grammar, table.states, table.transitions,
@@ -371,14 +503,117 @@ def print_states(grammar, table):
                              "LALR(1) states (merged LR(1) item sets)", table.merged_from)
 
 
+# ----------------------------------------------------------------------
+# Comparison report: all four methods for one grammar
+# ----------------------------------------------------------------------
+
+def compare_methods(grammar):
+    """
+    Build all four tables and return one row (a dict) per method with the
+    number of states, the remaining conflicts by kind, how many conflicts
+    precedence resolved, and the verdict "is the grammar in this class?".
+    """
+    rows = []
+    for method in METHOD_NAMES:
+        table = build_parsing_table(grammar, method)
+        shift_reduce = 0
+        reduce_reduce = 0
+        for c in table.conflicts:
+            if "shift-reduce" in c["kind"]:
+                shift_reduce += 1
+            if "reduce-reduce" in c["kind"]:
+                reduce_reduce += 1
+
+        if table.conflicts:
+            verdict = "no"
+        elif table.resolved:
+            # The table is usable, but only because of %left/%right: the
+            # grammar itself is not in this class (it is ambiguous).
+            verdict = "no (usable with precedence)"
+        else:
+            verdict = "yes"
+
+        rows.append({"method": method, "name": table.name, "states": len(table.states),
+                     "conflicts": len(table.conflicts), "shift_reduce": shift_reduce,
+                     "reduce_reduce": reduce_reduce, "resolved": len(table.resolved),
+                     "verdict": verdict})
+    return rows
+
+
+def print_comparison(grammar_file, rows):
+    """One grammar: a row per method."""
+    print(f"Comparison of LR methods for {grammar_file}")
+    header = f"{'Method':<9}{'States':>7}{'Conflicts':>11}{'S/R':>6}{'R/R':>6}" \
+             f"{'Resolved by prec.':>19}   In this class?"
+    print(header)
+    print("-" * (len(header) + 16))
+    for r in rows:
+        print(f"{r['name']:<9}{r['states']:>7}{r['conflicts']:>11}{r['shift_reduce']:>6}"
+              f"{r['reduce_reduce']:>6}{r['resolved']:>19}   {r['verdict']}")
+
+    strongest_needed = None
+    for r in rows:
+        if r["verdict"] == "yes":
+            strongest_needed = r["name"]
+            break
+    if strongest_needed:
+        print(f"=> The grammar is {strongest_needed} (and so also in every stronger class).")
+    else:
+        print("=> The grammar is not LR(1): it is not in any of these classes "
+              "(it may be ambiguous).")
+
+
+def print_comparison_summary(results):
+    """
+    Several grammars at once: results is a list of (grammar_file, rows).
+    Each cell is "yes", "no (k)" with k conflicts, or "prec" when precedence
+    removes all conflicts.
+    """
+    names = list(METHOD_NAMES.values())
+    width = 4
+    for grammar_file, rows in results:
+        width = max(width, len(grammar_file))
+    print(f"{'Grammar':<{width}}  " + "".join(f"{n:>10}" for n in names))
+    print("-" * (width + 2 + 10 * len(names)))
+    for grammar_file, rows in results:
+        cells = ""
+        for r in rows:
+            if r["verdict"] == "yes":
+                text = "yes"
+            elif r["conflicts"] == 0:
+                text = "prec"
+            else:
+                text = f"no ({r['conflicts']})"
+            cells += f"{text:>10}"
+        print(f"{grammar_file:<{width}}  {cells}")
+    print("yes = no conflicts;  no (k) = k conflicting cells;  "
+          "prec = conflicts removed by %left/%right")
+
+
 if __name__ == "__main__":
-    # Usage: python tables.py <grammar-file> [more files...] [--method slr|clr|lalr]
-    sys.stdout.reconfigure(encoding="utf-8")
+    # Usage: python tables.py <grammar-file> [more files...] [--method lr0|slr|lalr|clr]
+    #        python tables.py <grammar-file> [more files...] --compare
+    use_utf8_output()
     args = sys.argv[1:]
+    compare = "--compare" in args
+    if compare:
+        args.remove("--compare")
     method = pop_option(args, "--method", "slr")
     if not args or method not in METHOD_NAMES:
-        print("Usage: python tables.py <grammar-file> [more files...] [--method slr|clr|lalr]")
+        print("Usage: python tables.py <grammar-file> [more files...] "
+              "[--method lr0|slr|lalr|clr] [--compare]")
         sys.exit(1)
+
+    if compare:
+        results = []
+        for filename in args:
+            rows = compare_methods(load_grammar(filename))
+            results.append((filename, rows))
+            print_comparison(filename, rows)
+            print()
+        if len(results) > 1:
+            print_comparison_summary(results)
+        sys.exit(0)
 
     for filename in args:
         print("=" * 70)
@@ -395,5 +630,6 @@ if __name__ == "__main__":
         print(f"{table.name} parsing table:")
         print_table(g, len(table.states), table.action, table.goto_table)
         print()
+        print_resolutions(table)
         explain_conflicts(g, table.conflicts, table.name)
         print()

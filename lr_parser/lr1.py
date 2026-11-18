@@ -15,7 +15,7 @@ Dragon Book Section 4.7:
 """
 
 import sys
-from grammar import load_grammar, first_of_sequence, END_MARKER
+from grammar import load_grammar, first_of_sequence, END_MARKER, use_utf8_output
 from lr0 import LR0Item
 
 
@@ -263,7 +263,7 @@ def print_merge_report(grammar, merged_from, lr1_states):
 
 if __name__ == "__main__":
     # Usage: python lr1.py <grammar-file>
-    sys.stdout.reconfigure(encoding="utf-8")
+    use_utf8_output()
     if len(sys.argv) < 2:
         print("Usage: python lr1.py <grammar-file>")
         sys.exit(1)

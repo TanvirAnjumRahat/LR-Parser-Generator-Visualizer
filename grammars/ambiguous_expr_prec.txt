@@ -1,0 +1,7 @@
+# The ambiguous expression grammar with Yacc-style precedence (Dragon Book 4.8.1).
+# Later lines bind tighter: * has higher precedence than +; both are left-associative.
+# The conflicts are resolved in the table, so "id + id * id" parses as id + (id * id)
+# and "id + id + id" as (id + id) + id.
+%left +
+%left *
+E -> E + E | E * E | ( E ) | id

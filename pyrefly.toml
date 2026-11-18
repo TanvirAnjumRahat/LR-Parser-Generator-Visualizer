@@ -1,0 +1,4 @@
+# Tells the Pyrefly type checker (VS Code) where the project's modules are.
+# The tests import grammar, tables, parser, ... from lr_parser/ (they add it to
+# sys.path at run time), so lr_parser/ must be on Pyrefly's search path too.
+search-path = ["lr_parser"]
