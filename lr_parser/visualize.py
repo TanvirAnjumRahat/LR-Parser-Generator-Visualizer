@@ -1,7 +1,9 @@
 """
 visualize.py - Graphviz drawings.
 
-  - automaton_graph(): the LR(0) automaton, drawn like Dragon Book Figure 4.31.
+  - automaton_graph(): an LR automaton, drawn like Dragon Book Figure 4.31:
+                       LR(0) states (for LR(0)/SLR), LR(1) states with their
+                       lookaheads (CLR), or merged LALR(1) states.
                        Each state is a box: its name, the kernel items, a line,
                        then the closure items (in grey). Edges are labeled with
                        the GOTO symbol. The accept state is green and has a
@@ -10,8 +12,9 @@ visualize.py - Graphviz drawings.
   - save_graph():      writes output/<name>.dot, and output/<name>.png if the
                        Graphviz program "dot" is installed.
 
-Files are named after the grammar (e.g. expr_automaton.png,
-expr_parse_tree.png) so runs on different grammars don't overwrite each other.
+draw_automaton() and draw_parse_tree() name the files after the grammar and
+method (e.g. expr_slr_automaton.png, expr_parse_tree.png), so runs on
+different grammars don't overwrite each other.
 """
 
 import html

@@ -1,0 +1,59 @@
+Grammar: grammars/ambiguous_expr_prec.txt   Table: LALR(1) (10 states)   Input: id + id * id
+
+4 shift-reduce conflict(s) resolved by precedence/associativity:
+  state 7, input '*': s5/r1 -> s5   ('*' has higher precedence than E -> E + E)
+  state 7, input '+': s4/r1 -> r1   (same precedence, '+' is left-associative)
+  state 8, input '*': s5/r2 -> r2   (same precedence, '*' is left-associative)
+  state 8, input '+': s4/r2 -> r2   (E -> E * E has higher precedence than '+')
+
+Tokens from the lexer:
+LEXEME      TOKEN   LINE:COL
+id          id      1:1
++           +       1:4
+id          id      1:6
+*           *       1:9
+id          id      1:11
+
+      STACK        SYMBOLS              INPUT  ACTION
+-----------------------------------------------------------------------------
+ (1)  0                        id + id * id $  shift
+ (2)  0 3          id             + id * id $  reduce by E -> id
+ (3)  0 1          E              + id * id $  shift
+ (4)  0 1 4        E +              id * id $  shift
+ (5)  0 1 4 3      E + id              * id $  reduce by E -> id
+ (6)  0 1 4 7      E + E               * id $  shift
+ (7)  0 1 4 7 5    E + E *               id $  shift
+ (8)  0 1 4 7 5 3  E + E * id               $  reduce by E -> id
+ (9)  0 1 4 7 5 8  E + E * E                $  reduce by E -> E * E
+(10)  0 1 4 7      E + E                    $  reduce by E -> E + E
+(11)  0 1          E                        $  accept
+
+ACCEPTED.
+
+Productions used (in the order they were reduced):
+  (4) E -> id
+  (4) E -> id
+  (4) E -> id
+  (2) E -> E * E
+  (1) E -> E + E
+
+Rightmost derivation (the reductions in reverse order):
+    E
+ =>rm E + E
+ =>rm E + E * E
+ =>rm E + E * id
+ =>rm E + id * id
+ =>rm id + id * id
+
+Parse tree:
+E
+├── E
+│   └── id
+├── +
+└── E
+    ├── E
+    │   └── id
+    ├── *
+    └── E
+        └── id
+

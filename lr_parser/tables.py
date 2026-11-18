@@ -177,6 +177,7 @@ class ParsingTable:
         self.clr = None                   # LALR only: the CLR table it was made from
 
     def conflict_states(self):
+        """Numbers of the states that still have a conflict (drawn red by visualize.py)."""
         result = set()
         for c in self.conflicts:
             result.add(c["state"])
@@ -241,7 +242,7 @@ def apply_precedence(grammar, action):
     if not grammar.precedence:
         return resolved
 
-    for key in sorted(action.keys(), key=lambda k: (k[0], str(k[1]))):
+    for key in sorted(action.keys()):          # (state, symbol) pairs, in order
         cell = action[key]
         if len(cell) != 2:
             continue
@@ -322,8 +323,10 @@ def mark_conflicts_created_by_merging(lalr_table):
         if conflict_already_in_clr:
             continue
 
-        lines = [f"Created by merging LR(1) states "
-                 f"{', '.join('I' + str(i) for i in originals)} (same core). "
+        state_names = []
+        for i in originals:
+            state_names.append(f"I{i}")
+        lines = [f"Created by merging LR(1) states {', '.join(state_names)} (same core). "
                  f"In the CLR table each of them was conflict-free on '{c['symbol']}':"]
         for i in originals:
             cell = clr.action.get((i, c["symbol"]))
@@ -344,7 +347,7 @@ def find_conflicts(action):
                       reducing by S' -> S)
     """
     conflicts = []
-    for (state, symbol) in sorted(action.keys(), key=lambda k: (k[0], str(k[1]))):
+    for (state, symbol) in sorted(action.keys()):      # in state order, then symbol
         cell = action[(state, symbol)]
         if len(cell) < 2:
             continue

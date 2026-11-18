@@ -8,6 +8,8 @@ What this file does:
   3. Augments the grammar with a new start production  S' -> S
      (Dragon Book, Section 4.6.2 "Augmented grammar").
   4. Computes FIRST and FOLLOW sets (Dragon Book, Section 4.4.2).
+  5. Reads optional precedence declarations  %left + / %left *  (Phase 6,
+     Dragon Book 4.8.1) that tables.py uses to resolve conflicts.
 
 How epsilon is stored:
   - In the grammar file the word "epsilon" means the empty string.
@@ -54,7 +56,6 @@ class Grammar:
                         productions[0] is always S' -> S, so the user's
                         own rules are numbered 1, 2, 3 ... exactly like
                         the Dragon Book numbers them.
-      rules_for         dict: non-terminal -> list of its right-hand sides
       non_terminals     list, in order of first appearance (S' first)
       terminals         list, in order of first appearance (no "$")
       first, follow     dicts filled in by compute_first / compute_follow
@@ -95,13 +96,6 @@ class Grammar:
         for lhs, rhs in rule_list:
             self.productions.append((lhs, rhs))
 
-        # rules_for["E"] = [["E", "+", "T"], ["T"]]  (handy for closure later)
-        self.rules_for = {}
-        for nt in self.non_terminals:
-            self.rules_for[nt] = []
-        for lhs, rhs in self.productions:
-            self.rules_for[lhs].append(rhs)
-
         # --- Step 5: FIRST and FOLLOW ---
         self.first = compute_first(self)
         self.follow = compute_follow(self)
@@ -138,6 +132,7 @@ class Grammar:
         return name
 
     def is_terminal(self, symbol):
+        """True for the grammar's terminals and for the end marker $."""
         return symbol in self.terminals or symbol == END_MARKER
 
     def is_non_terminal(self, symbol):

@@ -57,6 +57,7 @@ class Session:
         self.last_result: ParseResult | None = None  # last parse, for drawing its tree
 
     def get_table(self):
+        """The parsing table for the current grammar and method, built only once."""
         if self.table is None:
             self.table = build_parsing_table(self.grammar, self.method)
         return self.table
@@ -142,6 +143,7 @@ def option_table(session):
 
 
 def option_parse(session, read, step_by_step):
+    """Options 6 and 7. If the table has conflicts, ask before using Yacc's default choices."""
     table = session.get_table()
     resolve = False
     if table.conflicts:

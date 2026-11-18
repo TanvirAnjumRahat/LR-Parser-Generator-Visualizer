@@ -18,8 +18,15 @@ Follows Dragon Book Algorithm 4.44 ("LR-parsing algorithm"):
   }
 
 The parser only looks at the ACTION and GOTO tables. It does not know or
-care whether they were built by SLR, CLR or LALR - so the same code will
-be reused for every table type.
+care whether they were built by LR(0), SLR, LALR or CLR - the same code
+parses with every table type (tables.build_parsing_table).
+
+Also in this file:
+  - parse_text(): runs lexer.py first, so real text like "count + 10" works
+  - conflicts: refuse to parse, or with resolve_conflicts=True use Yacc's
+    default choices (choose_action)
+  - rightmost_derivation(): the reductions in reverse order
+  - print_trace_step_by_step(): one move at a time, with an explanation
 
 Besides the state stack we keep a stack of parse-tree nodes. Its symbols
 are the "SYMBOLS" column of Figure 4.38, and every reduce builds a new
@@ -29,7 +36,7 @@ the single node left is the root of the parse tree.
 
 import sys
 from grammar import load_grammar, END_MARKER, EPSILON, use_utf8_output
-from tables import (find_conflicts, explain_conflicts,
+from tables import (find_conflicts, explain_conflicts, print_resolutions,
                     build_parsing_table, pop_option, METHOD_NAMES)
 from lexer import Token, tokenize, LexicalError, print_tokens
 
@@ -246,8 +253,8 @@ def parse(grammar, action, goto_table, tokens, resolve_conflicts=False):
                 children = [ParseTreeNode(EPSILON)]   # show A -> epsilon in the tree
 
             t = state_stack[-1]
-            g = goto_table[(t, A)]
-            state_stack.append(g)
+            goto_state = goto_table[(t, A)]
+            state_stack.append(goto_state)
             node_stack.append(ParseTreeNode(A, children))
             result.reductions.append(prod_index)
             description = f"reduce by {grammar.production_to_string(prod_index)}"
@@ -256,7 +263,7 @@ def parse(grammar, action, goto_table, tokens, resolve_conflicts=False):
             else:
                 popped = f"pop {len(beta)} symbol(s) '{' '.join(beta)}' (the handle)"
             explanation = (f"ACTION[{s}, {a}] = r{prod_index}: {popped}, state {t} is "
-                           f"now on top, GOTO[{t}, {A}] = {g}: push '{A}' and state {g}.")
+                           f"now on top, GOTO[{t}, {A}] = {goto_state}: push '{A}' and state {goto_state}.")
 
         # ---------- accept ----------
         else:
@@ -481,7 +488,6 @@ if __name__ == "__main__":
 
     # visualize needs the graphviz package, so import it only when run as a program
     from visualize import draw_parse_tree
-    from tables import print_resolutions
 
     g = load_grammar(args[0])
     table = build_parsing_table(g, method)

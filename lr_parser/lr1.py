@@ -231,7 +231,10 @@ def print_lr1_collection(grammar, states, transitions, title, merged_from=None):
             header = f"I{i}:   (merged from LR(1) states {numbers})"
         print(header)
         for item, lookaheads in group_by_core(grammar, states[i]):
-            tag = "" if item.is_kernel(grammar) else "(closure)"
+            if item.is_kernel(grammar):
+                tag = ""
+            else:
+                tag = "(closure)"
             print(f"    {'[' + item_group_text(item, lookaheads) + ']':<34}{tag}")
 
         moves = []

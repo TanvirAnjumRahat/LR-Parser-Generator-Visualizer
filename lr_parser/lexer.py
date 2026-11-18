@@ -67,6 +67,7 @@ class TransitionDiagram:
 
     @staticmethod
     def matches(label, c):
+        """Does character c fit an edge label: "letter", "digit", or that exact character?"""
         if c is None:                  # end of input matches nothing but "other"
             return False
         if label == "letter":
@@ -237,7 +238,10 @@ def print_tokens(tokens):
 if __name__ == "__main__":
     # Usage: python lexer.py "count + 10 * (x + y)"
     use_utf8_output()
-    source = sys.argv[1] if len(sys.argv) > 1 else "count + 10 * (x + y)"
+    if len(sys.argv) > 1:
+        source = sys.argv[1]
+    else:
+        source = "count + 10 * (x + y)"
     try:
         print_tokens(tokenize(source))
     except LexicalError as e:

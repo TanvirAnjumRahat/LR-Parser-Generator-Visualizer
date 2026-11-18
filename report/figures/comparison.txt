@@ -1,0 +1,103 @@
+Comparison of LR methods for grammars/ambiguous_expr.txt
+Method    States  Conflicts   S/R   R/R  Resolved by prec.   In this class?
+-------------------------------------------------------------------------------------------
+LR(0)         10          4     4     0                  0   no
+SLR(1)        10          4     4     0                  0   no
+LALR(1)       10          4     4     0                  0   no
+CLR(1)        18          8     8     0                  0   no
+=> The grammar is not LR(1): it is not in any of these classes (it may be ambiguous).
+
+Comparison of LR methods for grammars/ambiguous_expr_prec.txt
+Method    States  Conflicts   S/R   R/R  Resolved by prec.   In this class?
+-------------------------------------------------------------------------------------------
+LR(0)         10          0     0     0                  4   no (usable with precedence)
+SLR(1)        10          0     0     0                  4   no (usable with precedence)
+LALR(1)       10          0     0     0                  4   no (usable with precedence)
+CLR(1)        18          0     0     0                  8   no (usable with precedence)
+=> The grammar is not LR(1): it is not in any of these classes (it may be ambiguous).
+
+Comparison of LR methods for grammars/cc.txt
+Method    States  Conflicts   S/R   R/R  Resolved by prec.   In this class?
+-------------------------------------------------------------------------------------------
+LR(0)          7          0     0     0                  0   yes
+SLR(1)         7          0     0     0                  0   yes
+LALR(1)        7          0     0     0                  0   yes
+CLR(1)        10          0     0     0                  0   yes
+=> The grammar is LR(0) (and so also in every stronger class).
+
+Comparison of LR methods for grammars/dangling_else.txt
+Method    States  Conflicts   S/R   R/R  Resolved by prec.   In this class?
+-------------------------------------------------------------------------------------------
+LR(0)         10          1     1     0                  0   no
+SLR(1)        10          1     1     0                  0   no
+LALR(1)       10          1     1     0                  0   no
+CLR(1)        17          1     1     0                  0   no
+=> The grammar is not LR(1): it is not in any of these classes (it may be ambiguous).
+
+Comparison of LR methods for grammars/epsilon.txt
+Method    States  Conflicts   S/R   R/R  Resolved by prec.   In this class?
+-------------------------------------------------------------------------------------------
+LR(0)         16          4     4     0                  0   no
+SLR(1)        16          0     0     0                  0   yes
+LALR(1)       16          0     0     0                  0   yes
+CLR(1)        30          0     0     0                  0   yes
+=> The grammar is SLR(1) (and so also in every stronger class).
+
+Comparison of LR methods for grammars/expr.txt
+Method    States  Conflicts   S/R   R/R  Resolved by prec.   In this class?
+-------------------------------------------------------------------------------------------
+LR(0)         12          2     2     0                  0   no
+SLR(1)        12          0     0     0                  0   yes
+LALR(1)       12          0     0     0                  0   yes
+CLR(1)        22          0     0     0                  0   yes
+=> The grammar is SLR(1) (and so also in every stronger class).
+
+Comparison of LR methods for grammars/expr_num.txt
+Method    States  Conflicts   S/R   R/R  Resolved by prec.   In this class?
+-------------------------------------------------------------------------------------------
+LR(0)         13          2     2     0                  0   no
+SLR(1)        13          0     0     0                  0   yes
+LALR(1)       13          0     0     0                  0   yes
+CLR(1)        24          0     0     0                  0   yes
+=> The grammar is SLR(1) (and so also in every stronger class).
+
+Comparison of LR methods for grammars/lalr_conflict.txt
+Method    States  Conflicts   S/R   R/R  Resolved by prec.   In this class?
+-------------------------------------------------------------------------------------------
+LR(0)         13          6     0     6                  0   no
+SLR(1)        13          2     0     2                  0   no
+LALR(1)       13          2     0     2                  0   no
+CLR(1)        14          0     0     0                  0   yes
+=> The grammar is CLR(1) (and so also in every stronger class).
+
+Comparison of LR methods for grammars/reduce_reduce.txt
+Method    States  Conflicts   S/R   R/R  Resolved by prec.   In this class?
+-------------------------------------------------------------------------------------------
+LR(0)          5          2     0     2                  0   no
+SLR(1)         5          1     0     1                  0   no
+LALR(1)        5          1     0     1                  0   no
+CLR(1)         5          1     0     1                  0   no
+=> The grammar is not LR(1): it is not in any of these classes (it may be ambiguous).
+
+Comparison of LR methods for grammars/slr_conflict.txt
+Method    States  Conflicts   S/R   R/R  Resolved by prec.   In this class?
+-------------------------------------------------------------------------------------------
+LR(0)         10          1     1     0                  0   no
+SLR(1)        10          1     1     0                  0   no
+LALR(1)       10          0     0     0                  0   yes
+CLR(1)        14          0     0     0                  0   yes
+=> The grammar is LALR(1) (and so also in every stronger class).
+
+Grammar                                LR(0)    SLR(1)   LALR(1)    CLR(1)
+--------------------------------------------------------------------------
+grammars/ambiguous_expr.txt           no (4)    no (4)    no (4)    no (8)
+grammars/ambiguous_expr_prec.txt        prec      prec      prec      prec
+grammars/cc.txt                          yes       yes       yes       yes
+grammars/dangling_else.txt            no (1)    no (1)    no (1)    no (1)
+grammars/epsilon.txt                  no (4)       yes       yes       yes
+grammars/expr.txt                     no (2)       yes       yes       yes
+grammars/expr_num.txt                 no (2)       yes       yes       yes
+grammars/lalr_conflict.txt            no (6)    no (2)    no (2)       yes
+grammars/reduce_reduce.txt            no (2)    no (1)    no (1)    no (1)
+grammars/slr_conflict.txt             no (1)    no (1)       yes       yes
+yes = no conflicts;  no (k) = k conflicting cells;  prec = conflicts removed by %left/%right

@@ -53,8 +53,8 @@ class TestEpsilonGrammar(unittest.TestCase):
         self.assertEqual(self.g.augmented_start, "E''")
 
     def test_epsilon_stored_as_empty_list(self):
-        self.assertIn([], self.g.rules_for["E'"])
-        self.assertIn([], self.g.rules_for["T'"])
+        self.assertIn(("E'", []), self.g.productions)
+        self.assertIn(("T'", []), self.g.productions)
 
     def test_first(self):
         self.assertEqual(self.g.first["F"], {"(", "id"})
