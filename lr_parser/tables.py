@@ -24,6 +24,11 @@ r2 = reduce by production (2),  acc = accept.
 import sys
 from grammar import load_grammar, print_grammar_info, END_MARKER
 from lr0 import canonical_collection, print_collection
+from lr1 import (canonical_lr1_collection, merge_lalr_states,
+                 print_lr1_collection, print_merge_report)
+
+# The three table types this project builds, and their display names.
+METHOD_NAMES = {"slr": "SLR(1)", "clr": "CLR(1)", "lalr": "LALR(1)"}
 
 
 def add_action(action, state, symbol, act, item, reason):
@@ -73,6 +78,129 @@ def build_slr_table(grammar, states, transitions):
                 goto_table[(i, A)] = transitions[(i, A)]
 
     return action, goto_table
+
+
+def build_lr1_table(grammar, states, transitions):
+    """
+    Canonical LR(1) table, Dragon Book Algorithm 4.56. Also used for LALR(1)
+    (Algorithm 4.59, step 3), because LALR states are sets of LR(1) items too.
+
+    The only difference from SLR is rule (b): we reduce on the item's own
+    LOOKAHEAD, not on every terminal in FOLLOW(A).
+      (a) [A -> alpha · a beta, b] in I_i, GOTO(I_i, a) = I_j  ->  ACTION[i, a] = shift j
+      (b) [A -> alpha ·, a] in I_i, A != S'                     ->  ACTION[i, a] = reduce A -> alpha
+      (c) [S' -> S ·, $] in I_i                                  ->  ACTION[i, $] = accept
+    """
+    action = {}
+    goto_table = {}
+
+    for i in range(len(states)):
+        for item in states[i]:
+            a = item.next_symbol()
+
+            if a is not None and grammar.is_terminal(a):
+                j = transitions[(i, a)]
+                add_action(action, i, a, f"s{j}", item, f"GOTO(I{i}, {a}) = I{j}")
+
+            elif item.is_complete():
+                if item.lhs == grammar.augmented_start:
+                    add_action(action, i, END_MARKER, "acc", item, "S' -> S · with lookahead $")
+                else:
+                    b = item.lookahead
+                    add_action(action, i, b, f"r{item.prod_index}", item,
+                               f"the item's lookahead is '{b}'")
+
+        for A in grammar.non_terminals[1:]:
+            if (i, A) in transitions:
+                goto_table[(i, A)] = transitions[(i, A)]
+
+    return action, goto_table
+
+
+class ParsingTable:
+    """Everything about one parsing table, so callers don't care which method built it."""
+
+    def __init__(self, method, states, transitions, action, goto_table):
+        self.method = method              # "slr", "clr" or "lalr"
+        self.name = METHOD_NAMES[method]  # "SLR(1)", ...
+        self.states = states
+        self.transitions = transitions
+        self.action = action
+        self.goto_table = goto_table
+        self.conflicts = find_conflicts(action)
+        self.merged_from = None           # LALR only: LR(1) states merged into each state
+        self.clr = None                   # LALR only: the CLR table it was made from
+
+    def conflict_states(self):
+        result = set()
+        for c in self.conflicts:
+            result.add(c["state"])
+        return result
+
+
+def build_parsing_table(grammar, method):
+    """
+    Build the SLR(1), CLR(1) or LALR(1) table for a grammar.
+      slr  : LR(0) collection + FOLLOW sets         (Algorithm 4.46)
+      clr  : LR(1) collection + lookaheads          (Algorithm 4.56)
+      lalr : LR(1) collection, merge same cores,
+             then the same construction as clr      (Algorithm 4.59)
+    """
+    if method == "slr":
+        states, transitions = canonical_collection(grammar)
+        action, goto_table = build_slr_table(grammar, states, transitions)
+        return ParsingTable("slr", states, transitions, action, goto_table)
+
+    if method == "clr":
+        states, transitions = canonical_lr1_collection(grammar)
+        action, goto_table = build_lr1_table(grammar, states, transitions)
+        return ParsingTable("clr", states, transitions, action, goto_table)
+
+    if method == "lalr":
+        clr = build_parsing_table(grammar, "clr")
+        states, transitions, merged_from = merge_lalr_states(clr.states, clr.transitions)
+        action, goto_table = build_lr1_table(grammar, states, transitions)
+        table = ParsingTable("lalr", states, transitions, action, goto_table)
+        table.merged_from = merged_from
+        table.clr = clr
+        mark_conflicts_created_by_merging(table)
+        return table
+
+    raise ValueError(f"Unknown method '{method}'. Use one of: slr, clr, lalr")
+
+
+def mark_conflicts_created_by_merging(lalr_table):
+    """
+    A conflict in LALR state k on symbol a was CREATED by merging if none of
+    the LR(1) states merged into k had a conflict on a in the CLR table.
+    For such conflicts we store a note saying which LR(1) state each
+    conflicting item came from. (Merging can only create reduce-reduce
+    conflicts, never shift-reduce ones - see the viva notes.)
+    """
+    clr = lalr_table.clr
+    for c in lalr_table.conflicts:
+        originals = lalr_table.merged_from[c["state"]]
+
+        conflict_already_in_clr = False
+        for i in originals:
+            cell = clr.action.get((i, c["symbol"]))
+            if cell is not None and len(cell) > 1:
+                conflict_already_in_clr = True
+
+        if conflict_already_in_clr:
+            continue
+
+        lines = [f"Created by merging LR(1) states "
+                 f"{', '.join('I' + str(i) for i in originals)} (same core). "
+                 f"In the CLR table each of them was conflict-free on '{c['symbol']}':"]
+        for i in originals:
+            cell = clr.action.get((i, c["symbol"]))
+            if cell is None:
+                continue
+            for act, causes in cell.items():
+                for item, reason in causes:
+                    lines.append(f"  LR(1) state I{i}: {act} because of item {item}")
+        c["note"] = lines
 
 
 def find_conflicts(action):
@@ -134,7 +262,18 @@ def explain_conflicts(grammar, conflicts, table_name="SLR(1)"):
                 what = f"reduce by ({act[1:]}) {grammar.production_to_string(int(act[1:]))}"
             print(f"    {act:<4} {what}")
             for item, reason in causes:
-                print(f"           because of item  [{item}]   ({reason})")
+                print(f"           because of item  {item_text(item)}   ({reason})")
+        if "note" in c:
+            for line in c["note"]:
+                print("    " + line)
+
+
+def item_text(item):
+    """LR(1) items already print with brackets: [A -> a ·, b]. LR(0) items need them added."""
+    text = str(item)
+    if text.startswith("["):
+        return text
+    return "[" + text + "]"
 
 
 def print_table(grammar, num_states, action, goto_table):
@@ -201,14 +340,47 @@ def print_table(grammar, num_states, action, goto_table):
         print(line)
 
 
+def pop_option(args, name, default=None):
+    """
+    Remove "--name value" from the argument list and return value
+    (or default if the option is not there). Used by tables.py, parser.py
+    and visualize.py for --method and --out.
+    """
+    if name not in args:
+        return default
+    k = args.index(name)
+    if k + 1 >= len(args):
+        print(f"Missing value after {name}")
+        sys.exit(1)
+    value = args[k + 1]
+    del args[k:k + 2]
+    return value
+
+
+def print_states(grammar, table):
+    """Print the item sets that the table was built from."""
+    if table.method == "slr":
+        print_collection(grammar, table.states, table.transitions)
+    elif table.method == "clr":
+        print_lr1_collection(grammar, table.states, table.transitions,
+                             "Canonical collection of LR(1) items")
+    else:
+        print_merge_report(grammar, table.merged_from, table.clr.states)
+        print()
+        print_lr1_collection(grammar, table.states, table.transitions,
+                             "LALR(1) states (merged LR(1) item sets)", table.merged_from)
+
+
 if __name__ == "__main__":
-    # Usage: python tables.py ../grammars/expr.txt
+    # Usage: python tables.py <grammar-file> [more files...] [--method slr|clr|lalr]
     sys.stdout.reconfigure(encoding="utf-8")
-    if len(sys.argv) < 2:
-        print("Usage: python tables.py <grammar-file> [more files...]")
+    args = sys.argv[1:]
+    method = pop_option(args, "--method", "slr")
+    if not args or method not in METHOD_NAMES:
+        print("Usage: python tables.py <grammar-file> [more files...] [--method slr|clr|lalr]")
         sys.exit(1)
 
-    for filename in sys.argv[1:]:
+    for filename in args:
         print("=" * 70)
         print("Grammar file:", filename)
         print("=" * 70)
@@ -216,13 +388,12 @@ if __name__ == "__main__":
         print_grammar_info(g)
         print()
 
-        C, trans = canonical_collection(g)
-        print_collection(g, C, trans)
+        table = build_parsing_table(g, method)
+        print_states(g, table)
         print()
 
-        action, goto_table = build_slr_table(g, C, trans)
-        print("SLR(1) parsing table:")
-        print_table(g, len(C), action, goto_table)
+        print(f"{table.name} parsing table:")
+        print_table(g, len(table.states), table.action, table.goto_table)
         print()
-        explain_conflicts(g, find_conflicts(action))
+        explain_conflicts(g, table.conflicts, table.name)
         print()

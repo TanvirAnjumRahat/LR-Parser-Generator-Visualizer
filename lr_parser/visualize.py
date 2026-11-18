@@ -20,6 +20,8 @@ import sys
 
 import graphviz
 
+from lr1 import LR1Item, group_by_core, item_group_text
+
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_DIR = os.path.join(PROJECT_DIR, "output")
 
@@ -75,15 +77,35 @@ def accept_state_number(grammar, states):
     return None
 
 
-def state_label(grammar, i, items, is_accept, has_conflict):
+def item_lines(grammar, items):
+    """
+    The text lines to show for a state, as (text, is_kernel) pairs.
+      LR(0) items: one line per item, e.g.  E -> E · + T
+      LR(1) items: items with the same core share one line with all their
+                   lookaheads, as in the book, e.g.  C -> c · C, c/d
+    """
+    lines = []
+    if items and isinstance(items[0], LR1Item):
+        for item, lookaheads in group_by_core(grammar, items):
+            lines.append((item_group_text(item, lookaheads), item.is_kernel(grammar)))
+    else:
+        for item in items:
+            lines.append((str(item), item.is_kernel(grammar)))
+    return lines
+
+
+def state_label(grammar, i, items, is_accept, has_conflict, merged_from=None):
     """
     Build the HTML-like label of one state: a small table with
       row 1     : the state name (I0, I1, ...)
       next rows : kernel items
       a line    : <HR/>
       next rows : closure items, in grey
+    merged_from: for LALR, the LR(1) states this state was merged from.
     """
     title = f"I{i}"
+    if merged_from is not None and len(merged_from) > 1:
+        title += "  (= " + " + ".join(f"I{j}" for j in merged_from) + " of LR(1))"
     border_color = "black"
     background = "white"
     if is_accept:
@@ -95,22 +117,22 @@ def state_label(grammar, i, items, is_accept, has_conflict):
         background = "#fde0e0"     # light red
 
     kernel = []
-    closure_items = []
-    for item in items:
-        if item.is_kernel(grammar):
-            kernel.append(item)
+    closure_lines = []
+    for text, is_kernel in item_lines(grammar, items):
+        if is_kernel:
+            kernel.append(text)
         else:
-            closure_items.append(item)
+            closure_lines.append(text)
 
     rows = []
     rows.append(f'<TR><TD><B>{html_text(title)}</B></TD></TR>')
-    for item in kernel:
-        rows.append(f'<TR><TD ALIGN="LEFT">{html_text(str(item))}</TD></TR>')
-    if closure_items:
+    for text in kernel:
+        rows.append(f'<TR><TD ALIGN="LEFT">{html_text(text)}</TD></TR>')
+    if closure_lines:
         rows.append("<HR/>")
-        for item in closure_items:
+        for text in closure_lines:
             rows.append(f'<TR><TD ALIGN="LEFT"><FONT COLOR="#666666">'
-                        f'{html_text(str(item))}</FONT></TD></TR>')
+                        f'{html_text(text)}</FONT></TD></TR>')
 
     table = (f'<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" '
              f'COLOR="{border_color}" BGCOLOR="{background}">'
@@ -119,10 +141,13 @@ def state_label(grammar, i, items, is_accept, has_conflict):
     return "<" + table + ">"
 
 
-def automaton_graph(grammar, states, transitions, conflict_states=None, title=None):
+def automaton_graph(grammar, states, transitions, conflict_states=None, title=None,
+                    merged_from=None):
     """
-    Build the Graphviz graph of the LR(0) automaton.
+    Build the Graphviz graph of an LR automaton: LR(0) (for SLR), LR(1) (for CLR)
+    or the merged LALR(1) one - the states decide which.
     conflict_states: set of state numbers to draw in red (from the parsing table).
+    merged_from    : LALR only, merged_from[k] = LR(1) states merged into state k.
     """
     if conflict_states is None:
         conflict_states = set()
@@ -141,9 +166,13 @@ def automaton_graph(grammar, states, transitions, conflict_states=None, title=No
 
     # One box per state
     for i in range(len(states)):
+        group = None
+        if merged_from is not None:
+            group = merged_from[i]
         label = state_label(grammar, i, states[i],
                             is_accept=(i == accept_state),
-                            has_conflict=(i in conflict_states))
+                            has_conflict=(i in conflict_states),
+                            merged_from=group)
         graph.node(f"I{i}", label=label)
 
     # One edge per GOTO transition, labeled with the symbol
@@ -196,30 +225,28 @@ def parse_tree_graph(grammar, root):
 
 
 if __name__ == "__main__":
-    # Usage: python visualize.py <grammar-file> [--out NAME]
-    # Draws the LR(0) automaton; states with SLR(1) conflicts are red.
+    # Usage: python visualize.py <grammar-file> [--method slr|clr|lalr] [--out NAME]
+    # Draws the automaton the chosen table is built from; states with conflicts are red.
+    #   slr  -> LR(0) automaton            output/<name>_slr_automaton.png
+    #   clr  -> LR(1) automaton            output/<name>_clr_automaton.png
+    #   lalr -> merged LALR(1) automaton   output/<name>_lalr_automaton.png
     sys.stdout.reconfigure(encoding="utf-8")
     from grammar import load_grammar
-    from lr0 import canonical_collection
-    from tables import build_slr_table, find_conflicts
+    from tables import build_parsing_table, pop_option, METHOD_NAMES
 
     args = sys.argv[1:]
-    out = None
-    if "--out" in args:
-        k = args.index("--out")
-        out = args[k + 1]
-        del args[k:k + 2]
-    if not args:
-        print("Usage: python visualize.py <grammar-file> [--out NAME]")
+    out = pop_option(args, "--out")
+    method = pop_option(args, "--method", "slr")
+    if not args or method not in METHOD_NAMES:
+        print("Usage: python visualize.py <grammar-file> [--method slr|clr|lalr] [--out NAME]")
         sys.exit(1)
 
     g = load_grammar(args[0])
-    C, trans = canonical_collection(g)
-    action, goto_table = build_slr_table(g, C, trans)
-    conflict_states = set()
-    for c in find_conflicts(action):
-        conflict_states.add(c["state"])
+    table = build_parsing_table(g, method)
+    kind = {"slr": "LR(0) automaton", "clr": "LR(1) automaton",
+            "lalr": "LALR(1) automaton (merged LR(1) states)"}[method]
 
-    graph = automaton_graph(g, C, trans, conflict_states,
-                            title=f"LR(0) automaton for {args[0]}  (red = SLR(1) conflict)")
-    save_graph(graph, output_base_name(args[0], out) + "_automaton")
+    graph = automaton_graph(g, table.states, table.transitions, table.conflict_states(),
+                            title=f"{kind} for {args[0]}  (red = {table.name} conflict)",
+                            merged_from=table.merged_from)
+    save_graph(graph, output_base_name(args[0], out) + f"_{method}_automaton")

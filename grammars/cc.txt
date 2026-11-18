@@ -1,0 +1,6 @@
+# Dragon Book grammar (4.55), used for CLR(1) and LALR(1) in Section 4.7.
+#   CLR(1): 10 states (Figure 4.41, table in Figure 4.42)
+#   LALR(1): 7 states, I3+I6, I4+I7, I8+I9 merged (table in Figure 4.43)
+# Erroneous input "c c d" shows CLR detecting the error with no reductions.
+S -> C C
+C -> c C | d

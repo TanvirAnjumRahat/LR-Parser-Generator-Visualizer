@@ -1,0 +1,7 @@
+# LR(1) but NOT LALR(1) - the textbook example in Dragon Book Section 4.7.4.
+# CLR(1) has no conflicts. The LR(1) states {[A -> c·, d], [B -> c·, e]} and
+# {[A -> c·, e], [B -> c·, d]} have the same core, and merging them for LALR(1)
+# creates reduce-reduce conflicts on d and e.
+S -> a A d | b B d | a B e | b A e
+A -> c
+B -> c

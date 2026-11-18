@@ -29,8 +29,8 @@ the single node left is the root of the parse tree.
 
 import sys
 from grammar import load_grammar, END_MARKER, EPSILON
-from lr0 import canonical_collection
-from tables import build_slr_table, find_conflicts, explain_conflicts
+from tables import (find_conflicts, explain_conflicts,
+                    build_parsing_table, pop_option, METHOD_NAMES)
 from lexer import Token, tokenize, LexicalError, print_tokens
 
 
@@ -205,6 +205,8 @@ def parse(grammar, action, goto_table, tokens, resolve_conflicts=False):
             result.expected = expected_terminals(grammar, action, s)
             if a == END_MARKER:
                 found = "unexpected end of input"
+            elif bad.lexeme == a:
+                found = f"unexpected token '{a}'"
             else:
                 found = f"unexpected token '{bad.lexeme}' ({a})"
             result.error = (f"Syntax error at {where(bad)} (token {ip + 1}): {found}, "
@@ -356,6 +358,22 @@ def print_derivation(forms):
         print(" =>rm " + form_to_string(form))
 
 
+def reductions_before_error(result):
+    """
+    How many reduce moves the parser made after its last shift, before it
+    found the error. All LR parsers detect the error at the same token, but
+    SLR and LALR may first do some useless reductions; canonical LR does not
+    (its lookaheads are exact), so it reports the error sooner.
+    """
+    count = 0
+    for stack, symbols, remaining, action_text in reversed(result.steps):
+        if action_text.startswith("reduce"):
+            count += 1
+        elif action_text.startswith("shift"):
+            break
+    return count
+
+
 def print_result(grammar, result):
     """Print the trace, then either the tree + derivation or the error."""
     if result.steps:
@@ -364,6 +382,8 @@ def print_result(grammar, result):
 
     if not result.accepted:
         print("REJECTED.", result.error)
+        if result.steps:
+            print(f"Reductions done before the error was detected: {reductions_before_error(result)}")
         return
 
     print("ACCEPTED.")
@@ -380,8 +400,10 @@ def print_result(grammar, result):
 
 
 if __name__ == "__main__":
-    # Usage: python parser.py <grammar-file> "<source text>" [--resolve] [--out NAME]
+    # Usage: python parser.py <grammar-file> "<source text>"
+    #                         [--method slr|clr|lalr] [--resolve] [--out NAME]
     #   the text goes through the lexer: "count + 10 * (x + y)" -> id + num * ( id + id )
+    #   --method  : which parsing table to use (default slr)
     #   --resolve : parse even if the table has conflicts (Yacc default rules)
     #   --out NAME: name output files NAME_parse_tree.png (default: grammar file name)
     sys.stdout.reconfigure(encoding="utf-8")
@@ -389,29 +411,29 @@ if __name__ == "__main__":
     resolve = "--resolve" in args
     if resolve:
         args.remove("--resolve")
-    out = None
-    if "--out" in args:
-        k = args.index("--out")
-        out = args[k + 1]
-        del args[k:k + 2]
-    if len(args) < 2:
-        print('Usage: python parser.py <grammar-file> "<source text>" [--resolve] [--out NAME]')
+    out = pop_option(args, "--out")
+    method = pop_option(args, "--method", "slr")
+    if len(args) < 2 or method not in METHOD_NAMES:
+        print('Usage: python parser.py <grammar-file> "<source text>" '
+              '[--method slr|clr|lalr] [--resolve] [--out NAME]')
         sys.exit(1)
 
     # visualize needs the graphviz package, so import it only when run as a program
     from visualize import parse_tree_graph, save_graph, output_base_name
 
     g = load_grammar(args[0])
-    C, trans = canonical_collection(g)
-    action, goto_table = build_slr_table(g, C, trans)
+    table = build_parsing_table(g, method)
+    action = table.action
+    goto_table = table.goto_table
 
-    print(f"Grammar: {args[0]}   Table: SLR(1)   Input: {args[1]}")
+    print(f"Grammar: {args[0]}   Table: {table.name} ({len(table.states)} states)   "
+          f"Input: {args[1]}")
     print()
 
-    conflicts = find_conflicts(action)
+    conflicts = table.conflicts
     if conflicts:
-        print("WARNING: the SLR(1) table has conflicts.")
-        explain_conflicts(g, conflicts)
+        print(f"WARNING: the {table.name} table has conflicts.")
+        explain_conflicts(g, conflicts, table.name)
         print()
 
     result = parse_text(g, action, goto_table, args[1], resolve_conflicts=resolve)

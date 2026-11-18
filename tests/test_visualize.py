@@ -101,6 +101,28 @@ class TestConflictDrawing(unittest.TestCase):
                 self.assertNotIn('COLOR="red"', node_line(source, f"I{i}"))
 
 
+class TestLR1Drawing(unittest.TestCase):
+    """Phase 5: LR(1) and LALR(1) automata show lookaheads and merged states."""
+
+    def draw(self, method):
+        from tables import build_parsing_table
+        g = load_grammar(os.path.join(GRAMMAR_DIR, "cc.txt"))
+        t = build_parsing_table(g, method)
+        return automaton_graph(g, t.states, t.transitions, t.conflict_states(),
+                               merged_from=t.merged_from).source
+
+    def test_clr_items_show_lookaheads(self):
+        source = self.draw("clr")
+        self.assertIn("C -&gt; c · C, c/d", node_line(source, "I3"))
+        self.assertIn("C -&gt; c · C, $", node_line(source, "I6"))
+
+    def test_lalr_states_show_merged_lookaheads_and_origin(self):
+        source = self.draw("lalr")
+        self.assertIn("C -&gt; c · C, c/d/$", node_line(source, "I3"))
+        self.assertIn("I3 + I6 of LR(1)", node_line(source, "I3"))
+        self.assertEqual(node_line(source, "I7"), "")       # only 7 states: I0..I6
+
+
 class TestParseTreeDrawing(unittest.TestCase):
 
     def test_leaves_show_lexemes(self):
