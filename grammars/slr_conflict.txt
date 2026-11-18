@@ -1,0 +1,6 @@
+# Dragon Book grammar (4.49), Example 4.48: assignments with pointers.
+# Unambiguous, but NOT SLR(1): shift-reduce conflict on '=' in state 2,
+# because '=' is in FOLLOW(R). (CLR(1) and LALR(1) handle it.)
+S -> L = R | R
+L -> * R | id
+R -> L

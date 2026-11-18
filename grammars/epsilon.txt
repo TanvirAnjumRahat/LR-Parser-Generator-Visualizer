@@ -1,0 +1,8 @@
+# Expression grammar without left recursion - Dragon Book grammar (4.28)
+# E' and T' have epsilon rules. FIRST/FOLLOW values are in Example 4.30.
+# Note: E' is already used here, so the augmented start becomes E''.
+E -> T E'
+E' -> + T E' | epsilon
+T -> F T'
+T' -> * F T' | epsilon
+F -> ( E ) | id

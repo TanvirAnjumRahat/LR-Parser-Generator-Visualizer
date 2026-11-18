@@ -1,0 +1,5 @@
+# Expression grammar - Dragon Book grammar (4.1)
+# Left-recursive, so it is NOT LL(1), but it is SLR(1).
+E -> E + T | T
+T -> T * F | F
+F -> ( E ) | id

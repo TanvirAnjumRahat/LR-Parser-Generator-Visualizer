@@ -1,0 +1,6 @@
+# Small grammar with a reduce-reduce conflict.
+# After reading 'a', the parser cannot tell whether to reduce by A -> a
+# or B -> a, because FOLLOW(A) = FOLLOW(B) = { $ }.
+S -> A | B
+A -> a
+B -> a
